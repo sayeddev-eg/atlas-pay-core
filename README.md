@@ -30,7 +30,7 @@ The core engine is built as a **Modular Monolith** using **NestJS**, designed fo
 
 ```bash
 # Clone the repository
-git clone https://github.com/Sayed7122006/atlas-pay-core.git
+git clone https://github.com/sayeddev-eg/atlas-pay-core.git
 
 # Navigate to the project directory
 cd atlas-pay-core
@@ -63,5 +63,5 @@ npm run test:ci
 ## 👨‍💻 Author
 
 **Sayed Ali Elkelany**
-* **GitHub:** [@Sayed7122006](https://github.com/Sayed7122006)
+* **GitHub:** [@sayeddev-eg](https://github.com/sayeddev-eg)
 * **Email:** elkelanysayed6@gmail.com

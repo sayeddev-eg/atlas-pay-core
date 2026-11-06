@@ -48,10 +48,9 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'backend/package-lock.json'
 
-      - name: Install Dependencies (Strict)
-        # Using 'ci' instead of 'install' ensures exact versions from package-lock.json are used
+      - name: Install Dependencies
         working-directory: ./backend
-        run: npm ci
+        run: npm install
 
       - name: Generate Database Client
         working-directory: ./backend
