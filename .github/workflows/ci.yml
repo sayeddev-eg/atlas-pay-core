@@ -1,0 +1,94 @@
+name: ATLAS PAY Core Pipeline
+
+on:
+  push:
+    branches: [ main, staging ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality-assurance:
+    name: Code Quality & Integration Tests
+    runs-on: ubuntu-latest
+    
+    # Spinning up ephemeral PostgreSQL and Redis instances for real database & cache verification
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: atlas_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: atlas_test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Install Dependencies (Strict)
+        # Using 'ci' instead of 'install' ensures exact versions from package-lock.json are used
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Generate Database Client
+        working-directory: ./backend
+        run: npx prisma generate
+
+      - name: Execute Test Suite
+        working-directory: ./backend
+        env:
+          DATABASE_URL: postgresql://atlas_user:test_password@localhost:5432/atlas_test_db?schema=public
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test_ci_enterprise_secret_key_2026
+        run: npm run test:ci
+
+      - name: Verify Production Compilation
+        working-directory: ./backend
+        run: npm run build
+
+  build-container:
+    name: Build & Verify Docker Image
+    needs: quality-assurance
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Build Engine Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: false # Set to true when integrating with private container registry (ECR / Artifact Registry)
+          tags: atlas-pay/core-engine:latest
+          # Leveraging GitHub Actions cache to drastically reduce build times
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

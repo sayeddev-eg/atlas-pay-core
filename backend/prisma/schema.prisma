@@ -1,0 +1,154 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum MembershipRole {
+  ORG_ADMIN // مدير النظام داخل المنظمة
+  MAKER // منشئ العمليات (لا يملك حق الاعتماد)
+  CHECKER // معتمد العمليات (لا يملك حق الإنشاء)
+  VIEWER // صلاحية قراءة فقط للتقارير
+}
+
+enum TransactionStatus {
+  PENDING
+  COMMITTED
+  FAILED
+  REVERSED
+}
+
+enum EntryType {
+  DEBIT
+  CREDIT
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+model Organization {
+  id        String        @id @default(uuid()) @db.Uuid
+  name      String        @db.VarChar(255)
+  slug      String        @unique @db.VarChar(100)
+  status    AccountStatus @default(ACTIVE)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  memberships Membership[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique @db.VarChar(255)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  firstName    String        @map("first_name") @db.VarChar(100)
+  lastName     String        @map("last_name") @db.VarChar(100)
+  status       AccountStatus @default(ACTIVE)
+  lastLoginAt  DateTime?     @map("last_login_at")
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  memberships Membership[]
+
+  @@map("users")
+}
+
+model Membership {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  userId         String         @map("user_id") @db.Uuid
+  role           MembershipRole
+  status         AccountStatus  @default(ACTIVE)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+model Wallet {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  name           String        @db.VarChar(100)
+  currency       String        @db.Char(3) // USD, EGP
+  balance        BigInt        @default(0) // Zero Floating-Point Math: stored in cents
+  status         AccountStatus @default(ACTIVE)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  entries LedgerEntry[]
+
+  @@unique([organizationId, name, currency])
+  @@index([organizationId])
+  @@map("wallets")
+}
+
+model Transaction {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @map("organization_id") @db.Uuid
+  idempotencyKey String            @map("idempotency_key") @db.VarChar(255)
+  type           String            @db.VarChar(50) // TRANSFER, DEPOSIT, WITHDRAWAL
+  status         TransactionStatus @default(PENDING)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  entries LedgerEntry[]
+
+  @@unique([organizationId, idempotencyKey]) // Strict Idempotency per tenant
+  @@index([organizationId])
+  @@map("transactions")
+}
+
+model LedgerEntry {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  transactionId  String    @map("transaction_id") @db.Uuid
+  walletId       String    @map("wallet_id") @db.Uuid
+  type           EntryType // DEBIT, CREDIT
+  amount         BigInt // Stored in minor units (cents)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  wallet      Wallet      @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([walletId])
+  @@index([organizationId])
+  @@map("ledger_entries")
+}
+
+model OutboxEvent {
+  id            String       @id @default(uuid()) @db.Uuid
+  aggregateType String       @map("aggregate_type") @db.VarChar(100)
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  eventType     String       @map("event_type") @db.VarChar(100)
+  payload       Json // تخزين بيانات الحدث
+  status        OutboxStatus @default(PENDING)
+  retryCount    Int          @default(0) @map("retry_count")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  processedAt   DateTime?    @map("processed_at")
+
+  @@index([status, createdAt]) // ضروري لتسريع عمليات قراءة الـ Worker
+  @@map("outbox_events")
+}
